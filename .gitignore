@@ -1,0 +1,46 @@
+# ============================================================
+# ABD V1 .gitignore
+# ============================================================
+
+# Environment variables — NEVER commit these
+.env
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# IDE / editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Pytest cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Log files
+*.log
+
+# Workspace contents (personal files — not for version control)
+workspace/*
+!workspace/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/

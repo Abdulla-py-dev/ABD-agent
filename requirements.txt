@@ -1,0 +1,14 @@
+# ABD V1 — Requirements
+# Install with: pip install -r requirements.txt
+
+# Google Gemini API client (new unified SDK — replaces google-generativeai)
+google-genai>=1.0.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# PDF reading
+pypdf>=4.0.0
+
+# Rich terminal UI (colors, panels, spinners)
+rich>=13.7.0
