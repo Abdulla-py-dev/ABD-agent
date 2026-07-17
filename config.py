@@ -1,8 +1,14 @@
 """
-config.py — ABD V1 Configuration
-=================================
+config.py — ABD V2 Configuration
+==================================
 Loads all settings from the .env file and exposes them as typed constants.
 Import this module anywhere in the project to access configuration.
+
+V2 changes:
+  - Added LLM_PROVIDER ("ollama" | "gemini") — default "ollama"
+  - Added OLLAMA_BASE_URL and OLLAMA_MODEL
+  - Added OLLAMA_STREAM flag
+  - GEMINI_API_KEY is now optional when LLM_PROVIDER="ollama"
 """
 
 import os
@@ -18,23 +24,56 @@ load_dotenv(_PROJECT_ROOT / ".env")
 
 
 # ------------------------------------------------------------------
-# Gemini API settings
+# LLM Provider selection  (V2)
+# ------------------------------------------------------------------
+# "ollama"  — local Ollama server (no API key needed)
+# "gemini"  — Google Gemini API (requires GEMINI_API_KEY)
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower().strip()
+
+if LLM_PROVIDER not in ("ollama", "gemini"):
+    print(
+        f"[ABD CONFIG ERROR] Unknown LLM_PROVIDER='{LLM_PROVIDER}'. "
+        "Valid values are: 'ollama', 'gemini'."
+    )
+    sys.exit(1)
+
+
+# ------------------------------------------------------------------
+# Ollama settings  (V2)
+# ------------------------------------------------------------------
+OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
+
+# Stream Ollama responses token-by-token for a faster terminal feel.
+# Set OLLAMA_STREAM=false in .env to disable (useful for automated tests).
+OLLAMA_STREAM: bool = os.getenv("OLLAMA_STREAM", "true").lower() not in ("false", "0", "no")
+
+# Timeout in seconds for a single Ollama /api/chat request
+OLLAMA_TIMEOUT: int = int(os.getenv("OLLAMA_TIMEOUT", "120"))
+
+
+# ------------------------------------------------------------------
+# Gemini API settings  (kept for optional fallback)
 # ------------------------------------------------------------------
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 # Default to the stable alias that always resolves to the latest Flash model.
 # Override via GEMINI_MODEL in your .env file.
-# Known working aliases: gemini-flash-latest, gemini-pro-latest
-# Known working versions: gemini-2.0-flash-lite (free tier, may hit quota)
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
-if not GEMINI_API_KEY:
+# Gemini key is required only when it is the selected provider
+if LLM_PROVIDER == "gemini" and not GEMINI_API_KEY:
     print(
-        "[ABD CONFIG ERROR] GEMINI_API_KEY is not set.\n"
+        "[ABD CONFIG ERROR] LLM_PROVIDER=gemini but GEMINI_API_KEY is not set.\n"
         "  1. Copy .env.example to .env\n"
         "  2. Set your API key: GEMINI_API_KEY=your_key_here\n"
-        "  Get a free key at: https://aistudio.google.com/app/apikey"
+        "  Get a free key at: https://aistudio.google.com/app/apikey\n"
+        "  Or switch to local mode: LLM_PROVIDER=ollama"
     )
     sys.exit(1)
+
+if LLM_PROVIDER == "ollama" and not GEMINI_API_KEY:
+    # Not an error — just informational (logged, not printed, to keep startup clean)
+    pass
 
 
 # ------------------------------------------------------------------
@@ -70,7 +109,7 @@ else:
 # ------------------------------------------------------------------
 MAX_TOOL_ITERATIONS: int = int(os.getenv("MAX_TOOL_ITERATIONS", "10"))
 
-# PDF chunking: max characters per chunk sent to Gemini
+# PDF chunking: max characters per chunk sent to LLM
 PDF_CHUNK_SIZE: int = int(os.getenv("PDF_CHUNK_SIZE", "8000"))
 
 # Project root (useful for other modules)

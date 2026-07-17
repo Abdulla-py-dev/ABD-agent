@@ -1,14 +1,19 @@
 """
-brain/agent.py — ABD V1 Core Agent Loop
+brain/agent.py — ABD V2 Core Agent Loop
 =========================================
-Orchestrates multi-turn conversations between the user and Gemini,
-handling tool calls in a safe, bounded loop.
+Orchestrates multi-turn conversations between the user and the configured
+LLM provider (Ollama or Gemini), handling tool calls in a safe, bounded loop.
+
+V2 changes:
+  - Uses get_llm_client() factory instead of directly importing GeminiClient.
+  - Imports TOOL_SCHEMAS (for Ollama) and TOOL_DECLARATIONS (for Gemini) from router.
+  - All other orchestration logic is unchanged from V1.
 
 Flow per user message:
-  1. Send user message to Gemini.
-  2. If Gemini requests tool calls → execute them via the router.
-  3. Send tool results back to Gemini.
-  4. Repeat until Gemini returns a final text response (or max iterations).
+  1. Send user message to the LLM.
+  2. If the LLM requests tool calls → execute them via the router.
+  3. Send tool results back to the LLM.
+  4. Repeat until the LLM returns a final text response (or max iterations).
   5. Return the final response text to the caller (main.py).
 """
 
@@ -17,8 +22,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from llm.gemini_client import GeminiClient
-from brain.router import TOOL_DECLARATIONS, execute_tool
+from llm import get_llm_client
+from brain.router import TOOL_DECLARATIONS, TOOL_SCHEMAS, execute_tool
 from brain.prompts import SYSTEM_PROMPT
 from safety.permissions import log_action
 import config
@@ -29,6 +34,8 @@ logger = logging.getLogger("abd.agent")
 class ABDAgent:
     """The central ABD agent that manages conversation and tool orchestration.
 
+    Works with any LLM provider supported by the factory in llm/__init__.py.
+
     Usage:
         agent = ABDAgent()
         response = agent.chat("Open Calculator")
@@ -36,12 +43,15 @@ class ABDAgent:
     """
 
     def __init__(self) -> None:
-        self._client = GeminiClient(
-            tool_declarations=TOOL_DECLARATIONS,
+        self._client = get_llm_client(
+            tool_declarations=TOOL_DECLARATIONS,  # for Gemini
+            tool_schemas=TOOL_SCHEMAS,            # for Ollama
             system_prompt=SYSTEM_PROMPT,
         )
         self._turn_count = 0
-        logger.info("ABD Agent initialised.")
+        logger.info(
+            "ABD Agent initialised | provider=%s", config.LLM_PROVIDER
+        )
 
     # ------------------------------------------------------------------
     # Public interface
@@ -66,9 +76,10 @@ class ABDAgent:
 
         try:
             response = self._client.send_message(user_message)
-        except RuntimeError as exc:
-            logger.error("Gemini send_message failed: %s", exc)
-            return f"⚠️ I couldn't reach the Gemini API: {exc}"
+        except Exception as exc:
+            logger.error("LLM send_message failed: %s", exc)
+            # Surface the specific error to the user so they know what to fix
+            return f"⚠️ {exc}"
 
         # Run the tool-call resolution loop
         final_text = self._resolve_tool_calls(response)
@@ -81,19 +92,33 @@ class ABDAgent:
         self._turn_count = 0
         logger.info("Agent session reset.")
 
+    def set_stream_callback(self, callback) -> None:
+        """Attach or detach a streaming token callback on the LLM client.
+
+        Only has an effect when the active provider is OllamaClient with
+        streaming enabled.  Safe to call on GeminiClient (no-op).
+
+        Parameters
+        ----------
+        callback:
+            A callable ``(token: str) -> None``, or ``None`` to disable.
+        """
+        if hasattr(self._client, "set_stream_callback"):
+            self._client.set_stream_callback(callback)
+
     # ------------------------------------------------------------------
     # Internal: tool-call resolution loop
     # ------------------------------------------------------------------
 
     def _resolve_tool_calls(self, response: Any) -> str:
-        """Handle zero or more rounds of tool calls from Gemini.
+        """Handle zero or more rounds of tool calls from the LLM.
 
-        Gemini may return multiple function calls in one response, or chain
+        The LLM may return multiple function calls in one response, or chain
         tool calls across multiple turns.  We loop until either:
-          (a) Gemini returns a plain text response (no more tool calls), or
+          (a) The LLM returns a plain text response (no more tool calls), or
           (b) We hit the MAX_TOOL_ITERATIONS safety limit.
 
-        Returns the final plain-text response from Gemini.
+        Returns the final plain-text response from the LLM.
         """
         iterations = 0
 
@@ -101,7 +126,7 @@ class ABDAgent:
             function_calls = self._client.get_function_calls(response)
 
             if not function_calls:
-                # Gemini gave us a plain-text final answer
+                # LLM gave us a plain-text final answer
                 text = self._client.get_text(response)
                 if text:
                     return text
@@ -119,8 +144,7 @@ class ABDAgent:
                 [fc["name"] for fc in function_calls],
             )
 
-            # Execute each function call and collect results
-            # Gemini expects one tool_response per function_call in the same order
+            # Execute each function call and send results back to the LLM
             for fc in function_calls:
                 tool_name = fc["name"]
                 tool_args = fc["args"]
@@ -128,11 +152,11 @@ class ABDAgent:
                 logger.info("Calling tool: %s | args: %s", tool_name, tool_args)
                 tool_result = execute_tool(tool_name, tool_args)
 
-                # Send the result back to Gemini and get its next response
+                # Send the result back to the LLM and get its next response
                 try:
                     response = self._client.send_tool_result(tool_name, tool_result)
-                except RuntimeError as exc:
-                    logger.error("Failed to send tool result to Gemini: %s", exc)
+                except Exception as exc:
+                    logger.error("Failed to send tool result to LLM: %s", exc)
                     return (
                         f"⚠️ I executed '{tool_name}' but failed to send the "
                         f"result back to the AI: {exc}"

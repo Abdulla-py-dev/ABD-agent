@@ -1,5 +1,5 @@
 """
-main.py — ABD V1 Entry Point
+main.py — ABD V2 Entry Point
 ==============================
 Runs the interactive terminal chat interface.
 
@@ -40,7 +40,7 @@ except ImportError:
 # ------------------------------------------------------------------
 # ABD version
 # ------------------------------------------------------------------
-ABD_VERSION = "1.0.0"
+ABD_VERSION = "2.0.0"
 
 
 # ------------------------------------------------------------------
@@ -66,7 +66,8 @@ if _RICH_AVAILABLE:
         banner.append(" ██║  ██║██████╔╝██████╔╝\n", style="bold cyan")
         banner.append(" ╚═╝  ╚═╝╚═════╝ ╚═════╝ \n", style="bold cyan")
         subtitle = Text(
-            f"  Advanced Brain Desktop Assistant  ·  v{ABD_VERSION}  ·  Powered by Gemini",
+            f"  Advanced Brain Desktop Assistant  ·  v{ABD_VERSION}  ·  "
+            f"{'Ollama / ' + config.OLLAMA_MODEL if config.LLM_PROVIDER == 'ollama' else 'Gemini / ' + config.GEMINI_MODEL}",
             style="dim white"
         )
         console.print(banner)
@@ -114,10 +115,13 @@ if _RICH_AVAILABLE:
 else:
     # Fallback: plain print/input if Rich is not installed
     def _print_banner() -> None:
-        print("=" * 55)
+        print("=" * 60)
         print(f"  ABD — Advanced Brain Desktop Assistant v{ABD_VERSION}")
-        print("  Powered by Google Gemini")
-        print("=" * 55)
+        if config.LLM_PROVIDER == 'ollama':
+            print(f"  Powered by Ollama / {config.OLLAMA_MODEL}")
+        else:
+            print(f"  Powered by Google Gemini / {config.GEMINI_MODEL}")
+        print("=" * 60)
         print("  Type 'exit' to quit | 'reset' to start over")
         print()
 
@@ -211,7 +215,11 @@ def _handle_builtin(user_input: str, agent: ABDAgent) -> bool:
         return True
 
     if cmd in ("version", "--version"):
-        _print_info(f"ABD v{ABD_VERSION} | Model: {config.GEMINI_MODEL}")
+        if config.LLM_PROVIDER == "ollama":
+            provider_info = f"Ollama / {config.OLLAMA_MODEL}"
+        else:
+            provider_info = f"Gemini / {config.GEMINI_MODEL}"
+        _print_info(f"ABD v{ABD_VERSION} | Provider: {provider_info}")
         return True
 
     if cmd == "":
@@ -259,7 +267,10 @@ def main() -> None:
 
     # Initialise the agent
     try:
-        _print_info(f"Initialising ABD with model: {config.GEMINI_MODEL} …")
+        if config.LLM_PROVIDER == "ollama":
+            _print_info(f"Initialising ABD with Ollama model: {config.OLLAMA_MODEL} …")
+        else:
+            _print_info(f"Initialising ABD with Gemini model: {config.GEMINI_MODEL} …")
         agent = ABDAgent()
         _print_info(f"Workspace: {config.WORKSPACE_DIR}")
         _print_info(f"Ready! Session started at {datetime.now().strftime('%H:%M:%S')}")
@@ -286,14 +297,84 @@ def main() -> None:
 
         # Send to AI and display response
         try:
-            if _RICH_AVAILABLE:
-                with console.status("[dim]ABD is thinking…[/dim]", spinner="dots"):
-                    response = agent.chat(user_input)
-            else:
-                print("ABD is thinking…")
-                response = agent.chat(user_input)
+            # Determine if we should stream tokens directly to the terminal.
+            # Streaming mode: Ollama + OLLAMA_STREAM=true.
+            # In this path we print the ABD: prefix once, then feed each token
+            # inline via a callback — the full response is NOT printed again.
+            _streaming = (
+                config.LLM_PROVIDER == "ollama"
+                and config.OLLAMA_STREAM
+            )
 
-            _print_abd(response)
+            if _streaming:
+                # ── Streaming display path ─────────────────────────────────
+                # Shared mutable state for the callback closure:
+                #   first_token — True until the first token arrives
+                #   live        — reference to the Live spinner instance
+                _state: dict = {"first_token": True, "live": None}
+
+                def _write_token(tok: str) -> None:
+                    import sys as _sys
+                    if _state["first_token"]:
+                        _state["first_token"] = False
+                        # Stop and clear the spinner on the very first token
+                        if _state["live"] is not None:
+                            _state["live"].stop()
+                        # Print ABD: prefix exactly once
+                        if _RICH_AVAILABLE:
+                            console.print()
+                            console.print("[abd]ABD:[/abd] ", end="")
+                        else:
+                            _sys.stdout.write("\nABD: ")
+                            _sys.stdout.flush()
+                    # Write token inline — sys.stdout avoids Rich buffering
+                    _sys.stdout.write(tok)
+                    _sys.stdout.flush()
+
+                agent.set_stream_callback(_write_token)
+
+                if _RICH_AVAILABLE:
+                    from rich.live import Live as _Live
+                    from rich.spinner import Spinner as _Spinner
+                    _spin = _Spinner(
+                        "dots",
+                        text="[dim] ABD is thinking\u2026[/dim]",
+                        style="dim cyan",
+                    )
+                    # transient=True: spinner area is erased when live.stop()
+                    # is called, leaving a clean line for the ABD: prefix.
+                    with _Live(
+                        _spin,
+                        console=console,
+                        refresh_per_second=12,
+                        transient=True,
+                    ) as _live:
+                        _state["live"] = _live
+                        response = agent.chat(user_input)
+                else:
+                    # Non-Rich fallback: plain thinking message
+                    print("ABD is thinking\u2026")
+                    response = agent.chat(user_input)
+
+                agent.set_stream_callback(None)
+
+                if _state["first_token"]:
+                    # No tokens were streamed (empty response or error path)
+                    _print_abd(response)
+                else:
+                    print()   # end the streamed line
+                    print()   # blank line between turns
+
+            else:
+                # ── Non-streaming display path (unchanged V1 behaviour) ────
+                if _RICH_AVAILABLE:
+                    with console.status("[dim]ABD is thinking…[/dim]", spinner="dots"):
+                        response = agent.chat(user_input)
+                else:
+                    print("ABD is thinking…")
+                    response = agent.chat(user_input)
+
+                _print_abd(response)
 
         except KeyboardInterrupt:
             print()

@@ -1,11 +1,15 @@
-# ABD V1 — Requirements
+# ABD V2 — Requirements
 # Install with: pip install -r requirements.txt
 
 # Google Gemini API client (new unified SDK — replaces google-generativeai)
+# Optional in V2 when LLM_PROVIDER=ollama, but kept for Gemini fallback
 google-genai>=1.0.0
 
 # Environment variable management
 python-dotenv>=1.0.0
+
+# HTTP client — used by the Ollama client (V2)
+requests>=2.31.0
 
 # PDF reading
 pypdf>=4.0.0
