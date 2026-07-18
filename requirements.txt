@@ -16,3 +16,17 @@ pypdf>=4.0.0
 
 # Rich terminal UI (colors, panels, spinners)
 rich>=13.7.0
+
+# ── Voice (V2 Phase 2) ─────────────────────────────────────────────────────
+# Speech recognition via Google Web Speech API (free, no key needed)
+SpeechRecognition>=3.17.0
+
+# Text-to-Speech via Windows SAPI5 (built-in offline voices)
+pyttsx3>=2.99
+
+# PyAudio backend for SpeechRecognition microphone input.
+# NOTE: Use PyAudioWPatch instead of plain PyAudio on Python 3.13+.
+# PyAudio requires MSVC build tools which may not be available; PyAudioWPatch
+# ships a pre-built cp314-cp314-win_amd64 wheel — no compiler needed.
+PyAudioWPatch>=0.2.12.8
+

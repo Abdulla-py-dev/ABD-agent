@@ -5,6 +5,8 @@ Sets fake environment variables at process start so that config.py
 can import without a real .env file, Gemini API key, or running Ollama.
 
 V2: added Ollama env defaults and LLM_PROVIDER.
+V2 Phase 2: added VOICE_* env defaults (voice disabled in tests so no
+real microphone or speakers are required).
 """
 
 import os
@@ -33,3 +35,13 @@ os.environ.setdefault("OLLAMA_TIMEOUT", "10")
 # --- Gemini (kept for tests that need to import gemini_client) ---
 os.environ.setdefault("GEMINI_API_KEY", "fake-test-key-no-api-call-made")
 os.environ.setdefault("GEMINI_MODEL", "gemini-2.0-flash")
+
+# --- Voice (V2 Phase 2) — disabled by default so tests never need hardware ---
+os.environ.setdefault("VOICE_ENABLED", "false")
+os.environ.setdefault("VOICE_DEFAULT_MODE", "chat")
+os.environ.setdefault("VOICE_STT_TIMEOUT", "5")
+os.environ.setdefault("VOICE_STT_PHRASE_LIMIT", "15")
+os.environ.setdefault("VOICE_TTS_RATE", "175")
+os.environ.setdefault("VOICE_TTS_VOLUME", "1.0")
+os.environ.setdefault("VOICE_TTS_VOICE_PREFERENCE", "male")
+

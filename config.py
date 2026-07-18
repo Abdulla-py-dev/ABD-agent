@@ -114,3 +114,32 @@ PDF_CHUNK_SIZE: int = int(os.getenv("PDF_CHUNK_SIZE", "8000"))
 
 # Project root (useful for other modules)
 PROJECT_ROOT: Path = _PROJECT_ROOT
+
+
+# ------------------------------------------------------------------
+# Voice settings  (V2 Phase 2)
+# ------------------------------------------------------------------
+# Master switch — set to false to disable all voice features entirely.
+# Individual users without voice hardware can leave this false.
+VOICE_ENABLED: bool = os.getenv("VOICE_ENABLED", "true").lower() not in ("false", "0", "no")
+
+# Default interaction mode when ABD starts.
+#   "chat" — existing text-only CLI (default, preserves V1 behaviour)
+#   "talk" — Talk Mode (microphone → STT → agent → TTS)
+_voice_mode_env = os.getenv("VOICE_DEFAULT_MODE", "chat").lower().strip()
+VOICE_DEFAULT_MODE: str = _voice_mode_env if _voice_mode_env in ("chat", "talk") else "chat"
+
+# STT — SpeechRecognition / Google Web Speech API
+# Seconds to wait for speech to start before giving up
+VOICE_STT_TIMEOUT: int = int(os.getenv("VOICE_STT_TIMEOUT", "5"))
+# Maximum seconds of speech to capture in one utterance
+VOICE_STT_PHRASE_LIMIT: int = int(os.getenv("VOICE_STT_PHRASE_LIMIT", "15"))
+
+# TTS — pyttsx3 (Windows SAPI5)
+# Speech rate in words per minute (default Windows rate is ~200)
+VOICE_TTS_RATE: int = int(os.getenv("VOICE_TTS_RATE", "175"))
+# Volume: 0.0 (silent) to 1.0 (full)
+VOICE_TTS_VOLUME: float = float(os.getenv("VOICE_TTS_VOLUME", "1.0"))
+# Voice gender preference: "male", "female", or "any"
+VOICE_TTS_VOICE_PREFERENCE: str = os.getenv("VOICE_TTS_VOICE_PREFERENCE", "male").lower().strip()
+
