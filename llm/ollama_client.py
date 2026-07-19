@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Generator, Iterator
 
@@ -77,6 +78,11 @@ class OllamaResponse:
     done: bool = True
     # Raw response body for debugging
     raw: dict[str, Any] = field(default_factory=dict)
+    # Set of tool names currently enabled for this turn (injected by client).
+    # The fallback JSON parser uses this to accept ONLY recognized tool names.
+    _enabled_tool_names: frozenset[str] = field(
+        default_factory=frozenset, repr=False, compare=False
+    )
 
     @property
     def text(self) -> str | None:
@@ -86,7 +92,21 @@ class OllamaResponse:
 
     @property
     def function_calls(self) -> list[dict[str, Any]]:
-        """List of tool_call dicts, each with ``name`` and ``args``."""
+        """List of tool_call dicts, each with ``name`` and ``args``.
+
+        Primary source: the structured ``tool_calls`` field in the message.
+
+        Fallback: if the primary source is empty AND the model emitted a
+        JSON tool-call block inside ``content`` (e.g. Qwen's text-mode
+        tool calls), we parse it strictly:
+          - Only accept objects with ``name`` + ``arguments`` keys.
+          - The ``name`` MUST be a currently-enabled tool (in
+            ``_enabled_tool_names``), so the agent never executes a
+            hallucinated or out-of-scope tool name.
+          - Parsed calls still flow through the normal
+            ``execute_tool() → is_safe_tool_call()`` safety gate.
+        """
+        # --- Primary: structured tool_calls field ---
         tool_calls = self.message.get("tool_calls", [])
         result = []
         for tc in tool_calls:
@@ -101,6 +121,64 @@ class OllamaResponse:
                     arguments = {}
             if name:
                 result.append({"name": name, "args": arguments})
+
+        if result:
+            return result
+
+        # --- Fallback: parse tool-call JSON from content ---
+        content = self.message.get("content", "") or ""
+        if not content:
+            return []
+
+        # Match both tag-wrapped and bare JSON objects that look like tool calls
+        # Patterns Qwen uses:
+        #   <tool_call>{...}</tool_call>
+        #   ```json\n{...}\n```
+        #   bare JSON object at the start of content
+        _FALLBACK_PATTERNS = [
+            r"<tool_call>\s*({.*?})\s*</tool_call>",
+            r"```(?:json)?\s*({.*?})\s*```",
+            r"^\s*({\s*\"name\"\s*:.*?})\s*$",
+        ]
+
+        for pattern in _FALLBACK_PATTERNS:
+            for match in re.finditer(pattern, content, re.DOTALL):
+                raw_json = match.group(1).strip()
+                try:
+                    obj = json.loads(raw_json)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+                if not isinstance(obj, dict):
+                    continue
+
+                name = obj.get("name") or obj.get("function")
+                if not isinstance(name, str) or not name:
+                    continue
+
+                # STRICT: only accept names that are currently enabled
+                if self._enabled_tool_names and name not in self._enabled_tool_names:
+                    logger.debug(
+                        "Fallback tool-call parser: ignored unrecognised/disabled "
+                        "tool name %r (enabled: %s)",
+                        name, sorted(self._enabled_tool_names),
+                    )
+                    continue
+
+                arguments = obj.get("arguments") or obj.get("args") or obj.get("parameters") or {}
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except (json.JSONDecodeError, ValueError):
+                        arguments = {}
+                if not isinstance(arguments, dict):
+                    arguments = {}
+
+                logger.info(
+                    "Fallback JSON tool-call parser matched %r in content", name
+                )
+                result.append({"name": name, "args": arguments})
+
         return result
 
 
@@ -301,6 +379,27 @@ class OllamaClient:
             self._append_assistant_message(response)
             return response
 
+    def update_tool_schemas(self, schemas: list[dict[str, Any]]) -> None:
+        """Replace the tool schemas used for the *next* request.
+
+        Called by ``brain/agent.py`` on every turn with the intent-selected
+        subset so each request only sends the tools that are relevant.
+        The change takes effect immediately — the next call to
+        ``send_message()`` or ``send_tool_result()`` uses the new schemas.
+
+        Parameters
+        ----------
+        schemas:
+            The list of tool-schema dicts to use.  Pass ``[]`` to disable
+            tool calling entirely for this turn.
+        """
+        self._tool_schemas = schemas
+        logger.debug(
+            "Tool schemas updated: %d schema(s) → %s",
+            len(schemas),
+            [s["function"]["name"] for s in schemas],
+        )
+
     def set_stream_callback(self, callback: Any | None) -> None:
         """Set or clear the streaming token callback.
 
@@ -353,6 +452,36 @@ class OllamaClient:
             # Ollama expects tools in OpenAI-compatible format
             payload["tools"] = self._tool_schemas
         return payload
+
+    @staticmethod
+    def _log_ollama_metrics(body: dict[str, Any]) -> None:
+        """Log Ollama's native timing counters at DEBUG level.
+
+        Fields are reported in nanoseconds by Ollama; we convert to seconds
+        for human readability.
+
+        Metrics logged:
+          total_duration     — full wall-clock time inside Ollama
+          load_duration      — model load / KV-cache warm-up time
+          prompt_eval_count  — number of tokens in the prompt (incl. tools)
+          prompt_eval_duration — time spent processing the prompt tokens
+          eval_count         — number of generated (output) tokens
+          eval_duration      — time spent generating output tokens
+        """
+        ns = 1_000_000_000
+        total   = body.get("total_duration", 0) / ns
+        load    = body.get("load_duration",  0) / ns
+        p_count = body.get("prompt_eval_count", -1)
+        p_dur   = body.get("prompt_eval_duration", 0) / ns
+        e_count = body.get("eval_count", -1)
+        e_dur   = body.get("eval_duration",   0) / ns
+        tok_per_s = round(e_count / e_dur, 1) if e_count > 0 and e_dur > 0 else -1
+        logger.debug(
+            "Ollama metrics | total=%.2fs load=%.2fs "
+            "prompt_tokens=%d prompt_eval=%.2fs "
+            "gen_tokens=%d gen=%.2fs tok/s=%.1f",
+            total, load, p_count, p_dur, e_count, e_dur, tok_per_s,
+        )
 
     def _post(self, payload: dict[str, Any], stream: bool) -> requests.Response:
         """Make a POST to /api/chat and return the raw Response.
@@ -409,8 +538,16 @@ class OllamaClient:
         message = body.get("message", {})
         done = body.get("done", True)
 
+        self._log_ollama_metrics(body)
         logger.debug("Ollama response | done=%s message=%s", done, message)
-        return OllamaResponse(message=message, done=done, raw=body)
+
+        enabled = frozenset(
+            s["function"]["name"] for s in self._tool_schemas
+        )
+        return OllamaResponse(
+            message=message, done=done, raw=body,
+            _enabled_tool_names=enabled,
+        )
 
     def _stream_request(self) -> Generator[tuple[str, OllamaResponse], None, None]:
         """Send a streaming request and yield (token, partial_response) pairs.
@@ -424,6 +561,9 @@ class OllamaClient:
         accumulated_content = ""
         accumulated_tool_calls: list[dict] = []
         last_body: dict[str, Any] = {}
+        enabled = frozenset(
+            s["function"]["name"] for s in self._tool_schemas
+        )
 
         try:
             for line in resp.iter_lines():
@@ -459,12 +599,14 @@ class OllamaClient:
                     },
                     done=done,
                     raw=chunk,
+                    _enabled_tool_names=enabled,
                 )
 
                 if content_delta:
                     yield content_delta, current_response
 
                 if done:
+                    self._log_ollama_metrics(chunk)
                     # Yield a final response even if no new content token
                     if not content_delta:
                         yield "", current_response

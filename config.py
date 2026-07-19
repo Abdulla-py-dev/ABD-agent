@@ -112,6 +112,11 @@ MAX_TOOL_ITERATIONS: int = int(os.getenv("MAX_TOOL_ITERATIONS", "10"))
 # PDF chunking: max characters per chunk sent to LLM
 PDF_CHUNK_SIZE: int = int(os.getenv("PDF_CHUNK_SIZE", "8000"))
 
+# Maximum conversation history messages kept in OllamaClient._messages.
+# 0 = unlimited (default). Set to a positive integer in .env to enable
+# rolling-window truncation (system message always preserved).
+OLLAMA_MAX_HISTORY: int = int(os.getenv("OLLAMA_MAX_HISTORY", "0"))
+
 # Project root (useful for other modules)
 PROJECT_ROOT: Path = _PROJECT_ROOT
 

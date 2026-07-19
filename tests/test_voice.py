@@ -991,10 +991,14 @@ class TestVoiceSafetyIntegration:
         mock_client.get_function_calls.return_value = []
         mock_client.get_text.return_value = "I can help with that!"
 
-        with patch("llm.get_llm_client", return_value=mock_client):
+        # Patch at brain.agent.get_llm_client (the already-bound name) rather
+        # than llm.get_llm_client, so the mock intercepts ABDAgent.__init__
+        # regardless of whether brain.agent was imported earlier in the test run.
+        with patch("brain.agent.get_llm_client", return_value=mock_client):
             from brain.agent import ABDAgent
             agent = ABDAgent()
 
         response = agent.chat("Hello ABD")
         assert response == "I can help with that!"
         mock_client.send_message.assert_called_once_with("Hello ABD")
+

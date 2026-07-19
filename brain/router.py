@@ -713,6 +713,12 @@ TOOL_SCHEMAS: list[dict] = [
     },
 ]
 
+# Name-keyed index — allows O(1) schema lookup by tool name.
+# tool_selector.py uses this to build per-turn schema subsets.
+TOOL_SCHEMAS_BY_NAME: dict[str, dict] = {
+    s["function"]["name"]: s for s in TOOL_SCHEMAS
+}
+
 
 # ------------------------------------------------------------------
 # 4. Tool Executor
@@ -750,6 +756,7 @@ def execute_tool(name: str, args: dict[str, Any]) -> Any:
     try:
         fn = TOOL_REGISTRY[name]
         result = fn(**args)
+        logger.debug("Tool %s returned: %s", name, result)
         return result
     except TypeError as exc:
         # Mismatched arguments — likely a Gemini schema issue

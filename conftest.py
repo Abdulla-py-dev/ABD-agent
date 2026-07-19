@@ -31,6 +31,7 @@ os.environ.setdefault("OLLAMA_BASE_URL", "http://localhost:11434")
 os.environ.setdefault("OLLAMA_MODEL", "qwen2.5-coder:7b")
 os.environ.setdefault("OLLAMA_STREAM", "false")   # disable streaming in tests
 os.environ.setdefault("OLLAMA_TIMEOUT", "10")
+os.environ.setdefault("OLLAMA_MAX_HISTORY", "0")  # unlimited history in tests
 
 # --- Gemini (kept for tests that need to import gemini_client) ---
 os.environ.setdefault("GEMINI_API_KEY", "fake-test-key-no-api-call-made")
