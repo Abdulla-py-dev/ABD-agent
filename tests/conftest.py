@@ -32,6 +32,7 @@ def fake_env(tmp_path_factory):
         "LOG_FILE": str(fake_workspace / "test_actions.log"),
         "MAX_TOOL_ITERATIONS": "10",
         "PDF_CHUNK_SIZE": "8000",
+        "OLLAMA_KEEP_ALIVE": "10m",
     }
     with patch.dict(os.environ, env_overrides, clear=False):
         # Now import config so it picks up the fake env vars

@@ -235,6 +235,10 @@ class OllamaClient:
         # Conversation history — Ollama requires the full history each call
         self._messages: list[dict[str, Any]] = []
 
+        # Telemetry context — set by brain/agent.py before each request
+        self._last_intent: str | None = None
+        self._last_selected_schema_names: list[str] = []
+
         # Prepend the system message
         if system_prompt:
             self._messages.append({"role": "system", "content": system_prompt})
@@ -411,6 +415,19 @@ class OllamaClient:
         """
         self._on_token = callback
 
+    def set_telemetry_context(
+        self,
+        intent: str | None,
+        schema_names: list[str],
+    ) -> None:
+        """Record the current turn's intent and selected tool names for metrics logging.
+
+        Called by ``brain/agent.py`` before each ``send_message()`` so that
+        ``_log_ollama_metrics()`` can include intent and schema context.
+        """
+        self._last_intent = intent
+        self._last_selected_schema_names = list(schema_names)
+
     def reset_session(self) -> None:
         """Clear conversation history and start a fresh session."""
         self._messages = []
@@ -447,26 +464,18 @@ class OllamaClient:
             "model": self._model,
             "messages": self._messages,
             "stream": stream,
+            "keep_alive": config.OLLAMA_KEEP_ALIVE,
         }
         if self._tool_schemas:
             # Ollama expects tools in OpenAI-compatible format
             payload["tools"] = self._tool_schemas
         return payload
 
-    @staticmethod
-    def _log_ollama_metrics(body: dict[str, Any]) -> None:
+    def _log_ollama_metrics(self, body: dict[str, Any]) -> None:
         """Log Ollama's native timing counters at DEBUG level.
 
-        Fields are reported in nanoseconds by Ollama; we convert to seconds
-        for human readability.
-
-        Metrics logged:
-          total_duration     — full wall-clock time inside Ollama
-          load_duration      — model load / KV-cache warm-up time
-          prompt_eval_count  — number of tokens in the prompt (incl. tools)
-          prompt_eval_duration — time spent processing the prompt tokens
-          eval_count         — number of generated (output) tokens
-          eval_duration      — time spent generating output tokens
+        Includes intent and selected tool-schema context set by brain/agent.py.
+        No sensitive data (API keys, passwords, file contents, full history) is logged.
         """
         ns = 1_000_000_000
         total   = body.get("total_duration", 0) / ns
@@ -476,11 +485,22 @@ class OllamaClient:
         e_count = body.get("eval_count", -1)
         e_dur   = body.get("eval_duration",   0) / ns
         tok_per_s = round(e_count / e_dur, 1) if e_count > 0 and e_dur > 0 else -1
+
+        intent = self._last_intent or "unknown"
+        schema_count = len(self._last_selected_schema_names)
+        schema_names = self._last_selected_schema_names
+
         logger.debug(
-            "Ollama metrics | total=%.2fs load=%.2fs "
+            "Ollama metrics | intent=%s schemas=%d tools=%s "
             "prompt_tokens=%d prompt_eval=%.2fs "
+            "load=%.2fs total=%.2fs "
             "gen_tokens=%d gen=%.2fs tok/s=%.1f",
-            total, load, p_count, p_dur, e_count, e_dur, tok_per_s,
+            intent,
+            schema_count,
+            schema_names,
+            p_count, p_dur,
+            load, total,
+            e_count, e_dur, tok_per_s,
         )
 
     def _post(self, payload: dict[str, Any], stream: bool) -> requests.Response:

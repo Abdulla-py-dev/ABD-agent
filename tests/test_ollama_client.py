@@ -332,3 +332,113 @@ class TestPayloadConstruction:
     def test_system_message_in_history(self, client):
         assert client._messages[0]["role"] == "system"
         assert "ABD" in client._messages[0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# 7. keep_alive configuration
+# ---------------------------------------------------------------------------
+
+class TestOllamaKeepAlive:
+
+    def test_default_keep_alive_is_10m(self):
+        assert config.OLLAMA_KEEP_ALIVE == "10m"
+
+    def test_keep_alive_in_payload(self, client):
+        payload = client._build_payload(stream=False)
+        assert "keep_alive" in payload
+        assert payload["keep_alive"] == config.OLLAMA_KEEP_ALIVE
+
+    def test_keep_alive_override_via_env(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "5m")
+        import importlib
+        importlib.reload(config)
+        try:
+            assert config.OLLAMA_KEEP_ALIVE == "5m"
+            client = _make_client()
+            payload = client._build_payload(stream=False)
+            assert payload["keep_alive"] == "5m"
+        finally:
+            monkeypatch.delenv("OLLAMA_KEEP_ALIVE", raising=False)
+            importlib.reload(config)
+
+    def test_keep_alive_zero_disables(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "0")
+        import importlib
+        importlib.reload(config)
+        try:
+            assert config.OLLAMA_KEEP_ALIVE == "0"
+            client = _make_client()
+            payload = client._build_payload(stream=False)
+            assert payload["keep_alive"] == "0"
+        finally:
+            monkeypatch.delenv("OLLAMA_KEEP_ALIVE", raising=False)
+            importlib.reload(config)
+
+
+# ---------------------------------------------------------------------------
+# 8. Telemetry context
+# ---------------------------------------------------------------------------
+
+class TestTelemetryContext:
+
+    def test_set_telemetry_context_stores_intent_and_schemas(self):
+        client = _make_client()
+        assert client._last_intent is None
+        assert client._last_selected_schema_names == []
+
+        client.set_telemetry_context("APP", ["open_application", "list_supported_apps"])
+        assert client._last_intent == "APP"
+        assert client._last_selected_schema_names == [
+            "open_application",
+            "list_supported_apps",
+        ]
+
+    def test_set_telemetry_context_overwrites_previous(self):
+        client = _make_client()
+        client.set_telemetry_context("CONVERSATIONAL", [])
+        client.set_telemetry_context("FILE", ["list_files", "read_file"])
+        assert client._last_intent == "FILE"
+        assert client._last_selected_schema_names == ["list_files", "read_file"]
+
+    def test_set_telemetry_context_empty_schemas(self):
+        client = _make_client()
+        client.set_telemetry_context("CONVERSATIONAL", [])
+        assert client._last_selected_schema_names == []
+
+    def test_log_ollama_metrics_includes_intent_and_schemas(self, client, caplog):
+        import logging
+        client.set_telemetry_context("APP", ["open_application"])
+        body = {
+            "total_duration": 2_000_000_000,
+            "load_duration": 500_000_000,
+            "prompt_eval_count": 245,
+            "prompt_eval_duration": 1_000_000_000,
+            "eval_count": 10,
+            "eval_duration": 500_000_000,
+        }
+        with caplog.at_level(logging.DEBUG, logger="abd.ollama"):
+            client._log_ollama_metrics(body)
+        record = caplog.records[-1]
+        assert "intent=APP" in record.message
+        assert "schemas=1" in record.message
+        assert "open_application" in record.message
+        assert "prompt_tokens=245" in record.message
+        assert "load=0.50s" in record.message
+        assert "total=2.00s" in record.message
+
+    def test_log_ollama_metrics_handles_missing_context(self, client, caplog):
+        import logging
+        body = {
+            "total_duration": 1_000_000_000,
+            "load_duration": 200_000_000,
+            "prompt_eval_count": 40,
+            "prompt_eval_duration": 300_000_000,
+            "eval_count": 5,
+            "eval_duration": 200_000_000,
+        }
+        with caplog.at_level(logging.DEBUG, logger="abd.ollama"):
+            client._log_ollama_metrics(body)
+        record = caplog.records[-1]
+        assert "intent=unknown" in record.message
+        assert "schemas=0" in record.message
+        assert "tools=[]" in record.message

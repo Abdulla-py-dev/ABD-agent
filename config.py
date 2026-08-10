@@ -51,6 +51,11 @@ OLLAMA_STREAM: bool = os.getenv("OLLAMA_STREAM", "true").lower() not in ("false"
 # Timeout in seconds for a single Ollama /api/chat request
 OLLAMA_TIMEOUT: int = int(os.getenv("OLLAMA_TIMEOUT", "120"))
 
+# Keep the model loaded in memory for this duration after each request.
+# Prevents the ~8–13s model-load penalty on the next request after idle.
+# Accepts Ollama duration strings: "0" (disable), "5m", "10m", "1h", etc.
+OLLAMA_KEEP_ALIVE: str = os.getenv("OLLAMA_KEEP_ALIVE", "10m")
+
 
 # ------------------------------------------------------------------
 # Gemini API settings  (kept for optional fallback)

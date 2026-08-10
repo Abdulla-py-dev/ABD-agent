@@ -279,13 +279,28 @@ def main() -> None:
     # Print startup banner
     _print_banner()
 
+    # Determine which mode to start in
+    mode = args.mode or config.VOICE_DEFAULT_MODE  # CLI flag > env default
+
+    if mode == "talk" and not config.VOICE_ENABLED:
+        _print_error(
+            "Talk Mode requested but VOICE_ENABLED=false in config. "
+            "Falling back to Chat Mode."
+        )
+        mode = "chat"
+
+    talk_mode_instruction = None
+    if mode == "talk":
+        from brain.prompts import TALK_MODE_INSTRUCTION
+        talk_mode_instruction = TALK_MODE_INSTRUCTION
+
     # Initialise the agent
     try:
         if config.LLM_PROVIDER == "ollama":
             _print_info(f"Initialising ABD with Ollama model: {config.OLLAMA_MODEL} …")
         else:
             _print_info(f"Initialising ABD with Gemini model: {config.GEMINI_MODEL} …")
-        agent = ABDAgent()
+        agent = ABDAgent(talk_mode_instruction=talk_mode_instruction)
         _print_info(f"Workspace: {config.WORKSPACE_DIR}")
         _print_info(f"Ready! Session started at {datetime.now().strftime('%H:%M:%S')}")
         _print_rule()
@@ -296,20 +311,10 @@ def main() -> None:
         _print_error(f"Failed to initialise ABD: {exc}")
         sys.exit(1)
 
-    # Determine which mode to start in
-    mode = args.mode or config.VOICE_DEFAULT_MODE  # CLI flag > env default
-
     if mode == "talk":
         # ── Talk Mode ─────────────────────────────────────────────────
-        if not config.VOICE_ENABLED:
-            _print_error(
-                "Talk Mode requested but VOICE_ENABLED=false in config. "
-                "Falling back to Chat Mode."
-            )
-            mode = "chat"
-        else:
-            _run_talk_mode(agent, args)
-            return  # user exited Talk Mode — return cleanly
+        _run_talk_mode(agent, args)
+        return  # user exited Talk Mode — return cleanly
 
     if mode == "chat":
         # ── Chat Mode (default — unchanged V1/Phase 1 behaviour) ──────

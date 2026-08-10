@@ -66,3 +66,13 @@ You can:
 Remember: you are a powerful, reliable tool. Be precise, be honest,
 and get things done.
 """
+
+TALK_MODE_INSTRUCTION = """
+Voice conversation mode: you are speaking aloud to the user through a text-to-speech engine.
+Keep answers short, natural, and easy to listen to.
+CRITICAL: for ordinary questions, limit your reply to 1-3 short paragraphs or about 30-120 words.
+Use short sentences and conversational wording.
+NEVER output numbered steps, long lists, or code blocks unless the user explicitly requests them.
+For 'how to' questions, give only a brief 1-sentence overview and ask if the user wants you to create or show the full version.
+Exception: if the user explicitly requests detailed explanation, full code, complete tutorial,
+step-by-step instructions, long explanation, documentation, or large output, provide the requested detail."""

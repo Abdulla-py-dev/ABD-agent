@@ -530,3 +530,65 @@ class TestSessionReset:
         # After reset: only system message
         assert len(agent._client._messages) == 1
         assert agent._client._messages[0]["role"] == "system"
+
+
+def _make_agent_with_instruction(instruction: str):
+    from brain.agent import ABDAgent
+    return ABDAgent(talk_mode_instruction=instruction)
+
+
+# ---------------------------------------------------------------------------
+# 9. Talk Mode instruction
+# ---------------------------------------------------------------------------
+
+class TestTalkModeInstruction:
+
+    def test_talk_mode_instruction_appended_to_system_prompt(self):
+        from brain.prompts import TALK_MODE_INSTRUCTION
+        agent = _make_agent_with_instruction(TALK_MODE_INSTRUCTION)
+        system_content = agent._client._messages[0]["content"]
+        assert TALK_MODE_INSTRUCTION.strip() in system_content
+
+    def test_chat_mode_has_no_talk_instruction(self):
+        agent = _make_agent()
+        system_content = agent._client._messages[0]["content"]
+        assert "voice conversation mode" not in system_content
+
+    def test_default_agent_has_no_talk_instruction(self):
+        agent = _make_agent()
+        system_content = agent._client._messages[0]["content"]
+        assert "voice conversation mode" not in system_content
+
+    def test_talk_mode_instruction_contains_exception_keywords(self):
+        from brain.prompts import TALK_MODE_INSTRUCTION
+        keywords = [
+            "detailed explanation",
+            "full code",
+            "complete tutorial",
+            "step-by-step",
+            "long explanation",
+            "documentation",
+            "large output",
+        ]
+        instruction_lower = TALK_MODE_INSTRUCTION.lower()
+        for kw in keywords:
+            assert kw in instruction_lower, f"Missing exception keyword: {kw}"
+
+    def test_talk_mode_does_not_duplicate_entire_system_prompt(self):
+        from brain.prompts import SYSTEM_PROMPT, TALK_MODE_INSTRUCTION
+        agent = _make_agent_with_instruction(TALK_MODE_INSTRUCTION)
+        system_content = agent._client._messages[0]["content"]
+        assert system_content.count(SYSTEM_PROMPT.strip()) == 1
+        assert system_content.count(TALK_MODE_INSTRUCTION.strip()) == 1
+
+    def test_talk_mode_preserves_system_prompt_content(self):
+        from brain.prompts import SYSTEM_PROMPT, TALK_MODE_INSTRUCTION
+        agent = _make_agent_with_instruction(TALK_MODE_INSTRUCTION)
+        system_content = agent._client._messages[0]["content"]
+        assert SYSTEM_PROMPT.strip() in system_content
+
+    def test_chat_mode_uses_original_system_prompt(self):
+        from brain.prompts import SYSTEM_PROMPT
+        agent = _make_agent()
+        system_content = agent._client._messages[0]["content"]
+        assert system_content == SYSTEM_PROMPT

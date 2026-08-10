@@ -34,7 +34,7 @@ from typing import Any
 
 from llm import get_llm_client
 from brain.router import TOOL_DECLARATIONS, TOOL_SCHEMAS, execute_tool
-from brain.prompts import SYSTEM_PROMPT
+from brain.prompts import SYSTEM_PROMPT, TALK_MODE_INSTRUCTION
 from brain.tool_selector import classify_intent, select_tool_schemas, Intent
 from safety.permissions import log_action
 import config
@@ -53,11 +53,14 @@ class ABDAgent:
         print(response)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, talk_mode_instruction: str | None = None) -> None:
+        system_prompt = SYSTEM_PROMPT
+        if talk_mode_instruction:
+            system_prompt = system_prompt.rstrip() + "\n\n" + talk_mode_instruction
         self._client = get_llm_client(
             tool_declarations=TOOL_DECLARATIONS,  # for Gemini
             tool_schemas=TOOL_SCHEMAS,            # for Ollama (full set on init)
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system_prompt,
         )
         self._turn_count = 0
         # Keep a reference to the full schema list so select_tool_schemas()
@@ -100,6 +103,11 @@ class ABDAgent:
         if config.LLM_PROVIDER == "ollama" and hasattr(self._client, "update_tool_schemas"):
             selected = select_tool_schemas(intent, self._all_tool_schemas)
             self._client.update_tool_schemas(selected)
+            if hasattr(self._client, "set_telemetry_context"):
+                self._client.set_telemetry_context(
+                    intent.name,
+                    [s["function"]["name"] for s in selected],
+                )
             logger.info(
                 "Turn %d intent=%s → %d/%d schemas",
                 self._turn_count, intent.name,
